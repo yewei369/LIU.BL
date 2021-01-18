@@ -1,0 +1,228 @@
+---
+title: "Lab 3 Report"
+subtitle: "Bayesian Learning - 732A91"
+author: "Jun Li"
+date: "2020-05-07"
+output: 
+  pdf_document
+---
+
+```{r setup,eval=TRUE, echo=FALSE,warning=FALSE,message=FALSE}
+library(geoR)
+library(MCMCpack)
+library(mvtnorm)
+```
+
+
+# 1.Normal model, mixture of normal model with semi-conjugate prior
+## a) Normal model
+Trace-plot of simulated mean seems to converge at around 32.2168 vs sample mean of 32.2681. Initial values here are configured with $\mu_0=0,\tau_0^2=100,v_0=1,\sigma_0^2=\hat{\sigma^2}$.
+
+
+```{r, eval=TRUE,echo=TRUE}
+da1<-read.table('rainfall.dat',head=TRUE)
+da<-as.vector(as.matrix(da1))
+
+n<-length(da)
+mu0<-0#mean(da)
+tao0<-100
+v0<-1
+sigma0<-var(da)
+step=1000
+
+mygibbs<-function(step,mu0,tao0,v0,sigma0,n,da){
+  re<-matrix(0,nrow=step,ncol=2)  ##initialize with zeros
+  re[1,2]<-0.1
+  
+  for(i in 1:step){
+    w<-n/re[i,2]/(n/re[i,2]+1/tao0) ##  re[i,2] is population variance
+    taon<-1/(n/re[i,2]+1/tao0)
+    mun<-w*mean(da)+(1-w)*mu0
+    re[i,1]<-rnorm(1,mun,sqrt(taon))
+    re[i,2]<-rinvchisq(1,v0+n,(v0*sigma0+sum((da-re[i,1])^2))/(n+v0))
+    if(i<step) re[i+1,]<-re[i,]}
+  
+  return (re)}
+
+sim<-mygibbs(step,mu0,tao0,v0,sigma0,n,da)
+par(mfrow=c(2,1),mar=c(2,2,2,2))
+plot(sim[,1],main='Mu Gibbs Simulation',typ='l')
+plot(sim[,2],main='Sigma Gibbs Simulation',typ='l')
+```
+## b) Mixture normal model
+The trace plots show that $\mu, \sigma^2$ and $\pi$ converge after around 50 draws, with prior parameters $\mu_0=0, \tau_0^2=10, v_0=4, \sigma_0^2=\hat\sigma^2, \alpha=10$
+
+
+
+```{r, eval=TRUE,echo=TRUE,message=FALSE,error=FALSE,warning=FALSE}
+n<-length(da)
+k<-2    ## number of components
+mu0<-rep(0,k)  ## parameter of mu distribution prior
+tao0<-rep(10,k)
+v0<-rep(4,k)   ## parameter of sigma distribution prior
+sigma0<-rep(var(da),k)
+alpha<-rep(10,k)## parameter of Dirichlet distribution prior
+step=1000
+
+
+mygibbs1<-function(step,k,mu0,tao0,v0,sigma0,alpha,n,da){
+  mu<-matrix(quantile(da,probs=seq(0,1,length=k)),nrow=step,ncol=k,byrow=TRUE)
+  #mu<-matrix(0,nrow=step,ncol=k)  ##initialize with zeros
+  sigma<-matrix(var(da),nrow=step,ncol=k) 
+  pi<-matrix(1/k,nrow=step,ncol=k)  
+  cate<-t(rmultinom(n,size = 1,prob = rep(1/k,k)))
+  #cate<-matrix(0,nrow=n,ncol=k) ## initialize zeros for categories/clusters
+  #cate[1:(n/2),1]=1;cate[(n/2+1):n,2]=1
+  
+  
+  
+  for(i in 1:step){
+    ## update pi
+    pi[i,]<-rdirichlet(1,alpha+colSums(cate))
+    #pi[i,]<-rpi/sum(rpi)
+    
+    ## update mu+sigma
+    for(j in 1:k){
+      w<-n/sigma[i,j]/(n/sigma[i,j]+1/tao0[j]) ##  re[i,2] is population variance
+      taon<-1/(n/sigma[i,j]+1/tao0[j])
+      mun<-w*mean(da[which(cate[,j]==1)])+(1-w)*mu0[j]
+      mu[i,j]<-rnorm(1,mun,sqrt(taon))
+      sigma[i,j]<-rinvchisq(1,v0[j]+colSums(cate)[j],
+          (v0[j]*sigma0[j]+sum((da[which(cate[,j]==1)]-mu[i,j])^2))/(colSums(cate)[j]+v0[j]))}
+    
+    ## update/simulate cate 
+    for(m in 1:n)
+      {parcom<-rep(NA,k)
+       for(j in 1:k) parcom[j]<-pi[i,j]*dnorm(da[m],mu[i,j],sqrt(sigma[i,j]))
+       cate[m,]<-t(rmultinom(1,1,prob=parcom/sum(parcom)))}
+    
+    ## adopt newly updated parameters
+    if(i<step) {mu[i+1,]<-mu[i,]
+                sigma[i+1,]<-sigma[i,]}}
+                #pi[i+1,]<-pi[i,]}}
+  
+  return (list(mu=mu,sigma=sigma,pi=pi))}
+
+sim1<-mygibbs1(step,k,mu0,tao0,v0,sigma0,alpha,n,da)
+par(mfrow=c(3,2),mar=c(2,2,2,2))
+plot(sim1$mu[,1],main='Mu1 Simulation',typ='l')
+plot(sim1$mu[,2],main='Mu2 Simulation',typ='l')
+plot(sim1$sigma[,1],main='Sigma1 Simulation',typ='l')
+plot(sim1$sigma[,2],main='Sigma2 Simulation',typ='l')
+plot(sim1$pi[,1],main='Pi1 Simulation',typ='l')
+plot(sim1$pi[,2],main='Pi2 Simulation',typ='l')
+```
+
+
+
+## c) Graphical comparison
+Draws after 50 are adopted to calculate mean density of mixed distributions, where blue is the general normal distribution and green is mixed normal distribution based on mean density.
+
+```{r, eval=TRUE,echo=TRUE}
+rows=50:1000
+func1<-function(x) return(dnorm(x,mean(sim[,1]),sqrt(mean(sim[,2]))))
+func2<-function(x){
+  dens<-0
+  for(i in 1:step) dens<-dens+dnorm(x,sim1$mu[i,1],sqrt(sim1$sigma[i,1]))*sim1$pi[i,1]+
+        dnorm(x,sim1$mu[i,2],sqrt(sim1$sigma[i,2]))*sim1$pi[i,2]
+  
+  return(dens/step)} 
+
+hist(da,breaks=50,main="Model Comparison",prob=TRUE)
+#lines(density(da),col='red')
+curve(func1,col='blue',add=TRUE)
+curve(func2,col='green',add=TRUE)
+legend('topright',legend=c('Normal','Mixed Normal'),fill=c('blue','green'))
+
+```
+
+
+
+# 2.Metropolis Random Walk for Poisson regression
+## part a)
+According to glm fitting, the significant variables are Const, VerifyID, Sealed, MajBlem, LogBook, MinBidShare.
+
+```{r, eval=TRUE,echo=TRUE}
+da2<-read.table('eBayNumberOfBidderData.dat',head=TRUE)
+fit<-glm(nBids~0+.,data=da2,family=poisson)
+summary(fit)
+```
+
+
+## part b)
+
+
+
+```{r, eval=TRUE,echo=TRUE}
+X<-as.matrix(da2[,-1]);y<-as.vector(da2[,1])
+tao<-100
+npar<-dim(X)[2]
+
+
+
+logpost<-function(betaco,X,y,tao){#
+  logprior<-log(dmvnorm(betaco,rep(0,npar),tao^2*diag(npar)))
+  lin<-X%*%betaco
+  loglik<-sum((-log(factorial(y))-exp(lin)+lin*y))  ## TEXT BOOK equation 16.2  !!!!
+  #if(loglik>=0) loglik=-Inf  ## improved based on teacher's code 
+  
+  return (loglik+logprior)}
+
+
+opre<-optim(rep(0,npar),logpost,gr=NULL,X,y,tao,method=c('BFGS'),control=list(fnscale=-1),hessian=TRUE)#
+beta_mode<-opre$par
+cov_beta<--solve(opre$hessian)
+sd_beta<-sqrt(diag(cov_beta))
+
+print('The posterior mode is:')
+print(beta_mode)
+cat('\n')
+print('The covariances of posterior beta is:')
+print(cov_beta)
+cat('\n')
+```
+
+
+## part c)
+Trace plots show that all coefficients converge after around 100 draws.
+
+
+```{r, eval=TRUE,echo=TRUE}
+step=2000
+c=10
+logpost<-function(theta,c,beta_mode,cov_beta) return(log(dmvnorm(theta,beta_mode,c*cov_beta)))
+
+myRWM<-function(logpost,c,...){
+  X<-matrix(1,step,npar)
+  
+  for(i in 2:step)
+    {x<-X[i-1,]  ## x corresponds to theta in pdf()
+     y<-rmvnorm(1,x,c*cov_beta)
+     u<-runif(1)
+     a<-min(c(1,exp(logpost(y,c,beta_mode,cov_beta)-logpost(x,c,beta_mode,cov_beta))))
+     if(u<=a) X[i,]<-y else
+       X[i,]<-x}
+  
+  return (X)}
+
+sim<-myRWM(logpost,c,beta_mode,cov_beta)
+
+par(mfrow=c(3,3),mar=c(2,2,2,2))
+for(i in 1:9) plot(sim[,i],main=paste('Coef. ',i),typ='l')
+
+
+```
+
+
+
+## part d)
+The predictive distribution is as follows.
+
+
+```{r, eval=TRUE,echo=TRUE}
+x<-c(1,1,1,1,0,0,0,1,0.5)
+pre<-exp(sim[100:2000,]%*%x)
+hist(pre,breaks=50,main='Predictive Dist')
+
+
+```

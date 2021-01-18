@@ -1,0 +1,196 @@
+---
+title: "Lab 2 Report"
+subtitle: "Bayesian Learning - 732A91"
+author: "Jun Li"
+date: "2020-04-19"
+output: 
+  pdf_document
+---
+
+```{r setup,eval=TRUE, echo=FALSE,warning=FALSE,message=FALSE}
+library(mvtnorm)
+```
+
+
+# 1.Linear and polynomial regression
+## part a)
+The original prior seems giving a quite good simulations except under summer. Therefore a higher absolute value of second order's coefficient -6000 is suggested and it gives a better results. The bold black line in graph is the expected value of simulations.
+
+
+```{r, eval=TRUE,echo=TRUE}
+da1<-read.table('TempLinkoping.txt',head=TRUE)
+x<-da1$time;y<-da1$temp
+n<-length(x)
+X<-cbind(rep(1,n),x,x^2)
+beta_es<-solve(t(X)%*%X)%*%t(X)%*%as.matrix(y)
+
+mu0<-c(-10,100,-100);Sigma0<-diag(rep(0.01,3));v0<-4;sigma0_sq<-1
+
+myfunc<-function(mu0,Sigma0,vo,sigma0,main){
+  mun<-solve(t(X)%*%X+Sigma0)%*%(t(X)%*%X%*%beta_es+Sigma0%*%mu0)
+  Sigman<-t(X)%*%X+Sigma0
+  vn<-v0+n
+  sigman_sq<-(v0*sigma0_sq+t(y)%*%y+t(mu0)%*%Sigma0%*%mu0-t(mun)%*%Sigman%*%mun)/vn
+
+  num<-1000
+  beta_post<-matrix(nrow=3,ncol=num)
+  sigma_post<-vector(length=num)
+  ysim<-matrix(nrow=n,ncol=num)
+
+  plot(x,y,main=main,col='red',typ='l')
+  set.seed(12345)
+  for(i in 1:num){
+    chi<-rchisq(1,vn)
+    sigma_sq_post<-vn*sigman_sq/chi
+    sigma_post[i]<-sigma_sq_post
+    beta<-rmvnorm(1,mun,as.numeric(sigma_sq_post)*solve(Sigman))
+    beta_post[,i]<-beta
+    
+    ysim[,i]<-X%*%t(beta)
+    lines(x,ysim[,i],col=i/num*255)}
+  
+  yexp<-rowMeans(ysim)
+  lines(x,yexp,col='black',lw=5)
+  return (list(sigma_post=sigma_post,beta_post=beta_post,ysim=ysim))}
+
+f1<-myfunc(c(-10,100,-100),diag(rep(0.01,3)),4,1,"First try")
+f2<-myfunc(c(20,500,-500),diag(rep(0.1,3)),4,10,"Second try")
+
+```
+## part b)
+Marginal posteriror distributions of parameters are presented in following histograms. Original observations, median and credible interval of posterior are presented in the second graph, where the 95% interval covers better the summer observations but worse at beginning and end of the year.
+
+
+
+```{r, eval=TRUE,echo=TRUE}
+#graph1
+beta_post<-f2$beta_post;sigma_post<-f2$sigma_post;ysim<-f2$ysim
+par(mfrow=c(2,2),mar=c(2,2,2,2))
+hist(beta_post[1,],main='Beta0',breaks=50)
+hist(beta_post[2,],main='Beta1',breaks=50)
+hist(beta_post[3,],main='Beta2',breaks=50)
+hist(sigma_post,main='Sigma^2',breaks=50)
+
+#graph2
+findquantile<-function(vec,lowper,uppper){
+  len<-length(vec)
+  nyvec<-sort(vec)
+  upp<-nyvec[floor(len*uppper)]
+  low<-nyvec[floor(len*lowper)]
+  
+  return (c(upp,low))}
+
+
+ysim_median<-sapply(as.data.frame(t(ysim)),median)
+yupp<-vector(length=n);ylow<-vector(length=n)
+for(i in 1:n){
+  re<-findquantile(ysim[i,],0.025,0.975)
+  yupp[i]<-re[1];ylow[i]<-re[2]}
+
+
+par(mfrow=c(1,1),mar=c(2,2,2,2))
+plot(x,y,main="TempLinköping") #original curve
+lines(x,ysim_median,col='blue') # median curve
+lines(x,yupp,col='red')
+lines(x,ylow,col='black')
+legend('topright',legend=c('Median','97.5% limit','2.5% limit'),fill=c('blue','red','black'))
+```
+
+## part c)
+
+
+```{r, eval=TRUE,echo=TRUE}
+num<-1000
+xmode<-vector(length=num)
+for(i in 1:num) xmode[i]<--beta_post[2,i]/(2*beta_post[3,i])
+
+hist(xmode,main='Posterior mode',pro=TRUE,breaks=20)
+lines(density(xmode),col='red')
+```
+
+## part d)
+To reduce risk of overfitting, surpressing of coefficients of higher degree and increasing variance properly is the key. Therefore, [-10,100,-100,100,-50,30,-20,10] is suggested for $\mu_0$, and $0.05*I_3$ for $\Omega_0$ preliminarily.  
+
+
+
+# 2.Posterior approximation for classification with logistic regression
+## part a)
+Comparing with result from Glm model, the obtained posterior mode for NSmallChild is reasonable.
+
+
+
+```{r, eval=TRUE,echo=TRUE}
+da2<-read.table('WomenWork.dat',head=TRUE)
+n<-dim(da2)[1];npar<-dim(da2)[2]-1
+
+X<-as.matrix(da2[,-1]);y<-as.vector(da2[,1])
+tao<-10
+
+
+logpost<-function(betaco,X,y,tao){
+  logprior<-log(dmvnorm(betaco,matrix(0,npar,1),tao^2*diag(npar)))
+  
+  lin<-X%*%betaco
+  loglik<-sum(y*lin-log(1+exp(lin)))
+  if(loglik>=0) loglik=-Inf  ## improved based on teacher's code 
+  
+  return (loglik+logprior)}
+
+opre<-optim(matrix(0,npar,1),logpost,gr=NULL,X,y,tao,method=c('BFGS'),control=list(fnscale=-1),hessian=TRUE)
+beta_mode<-opre$par
+cov_beta<--solve(opre$hessian)
+sd_beta<-sqrt(diag(cov_beta))
+
+print('The posterior mode is:')
+print(beta_mode)
+cat('\n')
+print('The covariances of posterior beta is:')
+print(cov_beta)
+cat('\n')
+print(paste('The approximate 95% credibal interval of variable NSmallChild is: [',qnorm(0.025,beta_mode[npar-1],sd_beta[npar-1]),',',qnorm(0.975,beta_mode[npar-1],sd_beta[npar-1]),']',sep=""))
+cat('\n')
+
+glmModel<-glm(Work~0+.,data=da2,family=binomial)
+print('Here comes the result of Glm model:')
+glmModel
+```
+
+
+## part b)
+It shows that this women has lower probability that she works.
+
+
+```{r, eval=TRUE,echo=TRUE}
+x<-c(1,10,8,10,1,40,1,1)
+num<-1000
+co<-rmvnorm(num,beta_mode,cov_beta)
+lin<-co%*%x
+pre<-exp(lin)/(1+exp(lin))
+pre<-ifelse(pre>=0.5,1,0)
+hist(pre,main='Predictive Distribution',breaks=4)
+
+```
+
+
+## part c)
+The predictive distribution of number of working women is presented in the following graph, which adopts Binomial distribution using expectation of posterior as probability of the women working. The posterior number of working wemen with given features has its highest value of 2, which conforms with Binomial distributions expectation $np=10*0.23\approx2$.
+
+
+```{r, eval=TRUE,echo=TRUE}
+##method 1: Binomial distribution based on posterior expectation 
+x<-c(1,10,8,10,1,40,1,1)
+num<-1000
+co<-rmvnorm(num,beta_mode,cov_beta)
+lin<-co%*%x
+pre<-exp(lin)/(1+exp(lin))
+
+no<-rep(0,num)
+for(i in 1:num) no[i]<-sum(rbinom(10,1,pre))
+barplot(table(no))
+
+##method 2? simulate 1000 times where each simulation generate 10 random samples and count number of working women. 
+##seems does not work
+```
+
+
+

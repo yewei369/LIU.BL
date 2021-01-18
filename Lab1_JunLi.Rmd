@@ -1,0 +1,143 @@
+---
+title: "Lab 1 Report"
+subtitle: "Bayesian Learning - 732A91"
+author: "Jun Li"
+date: "2020-04-07"
+output: 
+  pdf_document
+---
+
+```{r setup,eval=TRUE, echo=FALSE,warning=FALSE,message=FALSE}
+options(digits=2)
+library(geoR)
+```
+
+
+# 1.Bernoulli
+## part a)
+With given parameters, the posterior is $P(\theta|y)\sim Beta(7,17)$, which has mean of 7/(7+17)=0.29 and standard deviation of sqrt(7x17/(7+17)^2/(7+17+1))=0.091. The graph below shows that as number of random draws increases, the mean and standard deviation of simulations approach the real values.
+
+```{r, eval=TRUE,echo=TRUE}
+myhist<-function(nsim){
+  sim<-vector(length=nsim)
+  sim<-rbeta(nsim,7,17)
+  mu<-round(mean(sim),digits=3);dev<-round(sd(sim),digits=3)
+  hist(sim,main=paste(nsim,' simulations:mu=',mu,',sd=',dev,sep=""),prob=TRUE,density=TRUE,breaks=100)
+  lines(density(sim),col='red')}
+
+par(mfrow=c(2,2),mar=c(2,2,2,2))
+myhist(100);myhist(500);myhist(1000);myhist(10000)
+
+```
+## part b)
+It shows that probability of simulation is quite close to exact value.
+
+```{r, eval=TRUE,echo=TRUE}
+sim<-rbeta(10000,7,17)
+simre<-sum(sim>0.3)/10000
+rre<-1-pbeta(0.3,7,17)
+print(paste('Probability of simulation is ',simre,sep=""))
+print(paste('Probability of theoretical value is ',rre,sep=""))
+```
+
+## part c)
+The simulated posterior of transform pi seems to have a normal distribution with mean of around -0.9.
+
+```{r, eval=TRUE,echo=TRUE}
+phi<-log(sim/(1-sim))
+hist(phi,main="Posterior of pi",breaks=100,prob=TRUE)
+lines(density(phi),col="red")
+
+```
+
+
+# 2.Log-normal distribution and the Gini coefficient
+## part a)
+The graph below shows simulations are consistent with theoretical distribution from R.
+
+```{r, eval=TRUE,echo=TRUE}
+sam<-c(44,25,45,52,30,63,19,50,34,67)
+logn<-function(y,mu,sig) return(1/(y*sqrt(2*pi*sig^2))*exp(-1/(2*sig^2)*(log(y)-mu)^2))
+
+mu=3.7
+n<-length(sam)
+t2<-sum((log(sam)-mu)^2)/n
+rsig2<-function(nsim) return((n*t2)/rchisq(nsim,n))
+sim<-rsig2(10000)
+theo<-rinvchisq(10000,n,t2)  ## caution! should be square format here
+
+hist(sim,main="Sim vs Theo.",breaks=100,prob=TRUE)
+lines(density(sim),col="red")
+lines(density(theo),col="blue")
+legend('topright',legend=c('Sim','Theo'),fill=c('red','blue'))
+
+```
+
+
+## part b)
+The posterior distribution of the Gini coefficient G for the current data set is as follows.
+
+
+```{r, eval=TRUE,echo=TRUE}
+g<-2*pnorm(sqrt(sim/2),0,1)-1
+hist(g,main="Posterior of G",breaks=100,prob=TRUE)
+lines(density(g),col="red")
+```
+
+
+## part c)
+The results below shows that intervals from both methods are approximately the same.
+
+```{r, eval=TRUE,echo=TRUE}
+d<-density(g)
+numd<-length(d$x)
+## method 1 with draws
+a1<-NA;b1<-NA
+sortg<-sort(g)
+for(i in 1:10000){
+  if(sum(sortg<sortg[i])/10000>0.05 & is.na(a1)) a1<-sortg[i] 
+  if(sum(sortg<sortg[i])/10000>0.95 & is.na(b1)) b1<-sortg[i] }
+print(paste('Interval by simulations is: [',a1,',',b1,']',sep=""))
+
+
+## method 2 with desity function
+gcd<-vector(length=numd)
+a2<-NA;b2<-NA
+for(i in 1:numd) gcd[i]<-sum(d$y[1:i])
+gcd<-gcd/gcd[numd]
+for(i in 1:numd){
+  if(gcd[i]>0.05 & is.na(a2)) a2<-d$x[i]
+  if(gcd[i]>0.95 & is.na(b2)) b2<-d$x[i]}
+print(paste('Interval by density() is: [',a2,',',b2,']',sep=""))
+
+
+```
+
+
+# 3.Bayesian inference in the von Mises distribution
+The posterior of k given the data y is presented as below, which is approximately the same as distribution Gamma(4,2). They both have mean of 2, and give the QQ-plot as in the second graph.
+
+
+```{r, eval=TRUE,echo=TRUE,message=FALSE,error=FALSE}
+y<-c(-2.44,2.14,2.54,1.83,2.02,2.33,-2.79,2.23,2.07,2.02)
+mu<-2.39
+
+likeli<-function(k,y) return(exp(k*cos(y-mu))/(2*pi*besselI(k,0)))
+prior<-function(k) return(dexp(k,1))
+post<-function(k){
+  re<-prior(k)
+  for(i in 1:10) re<-re*likeli(k,y[i])
+  return(re)} 
+
+#curve(post,0,8)
+k<-seq(0,8,0.01)
+pk<-post(k)
+plot(k,pk,col="black",typ='l',main='Posterior of k')
+pg<-dgamma(k,4,2)
+qqplot(pk,pg,main='P(k|y) vs Gamma(4,2)')
+#lines(k,pg,col="red")
+
+
+```
+
+

@@ -1,0 +1,128 @@
+---
+title: "Lab 4 Report"
+subtitle: "Bayesian Learning - 732A91"
+author: "Jun Li"
+date: "2020-05-19"
+output: 
+  pdf_document
+---
+
+```{r setup,eval=TRUE, echo=FALSE,warning=FALSE,message=FALSE}
+library(rstan)
+```
+
+
+# 1.Time series models in Stan
+## part a)
+$\phi$ through time will accumulate multiplication effect upon time series. If $\phi>1$ the time serie will explode and not be stationary, larger value brings larger turbulances and negative value will result in swinging effect.
+
+```{r, eval=TRUE,echo=TRUE}
+mysam<-function(mu,sigma2,T,phi){
+  re<-rep(NA,T)
+  re[1]<-mu
+
+  for(i in 2:T){
+    epsilon<-rnorm(1,0,sigma2)
+    re[i]<-mu+phi*(re[i-1]-mu)+epsilon}
+  
+  return (re)}
+
+pool=c(-0.5,0.5,0)
+par(mfrow=c(2,2),mar=c(2,2,2,2))
+for(i in 1:3) plot(mysam(10,2,200,pool[i]),main=paste('phi=',pool[i],sep=''),typ='l')
+
+```
+
+
+## part b)
+Prior of parameters are not specified here, which means there is unbounded uniform adopted as default improper prior. Fitting results show that parameter $\phi$ has been somehow correctly estimated, while there are significant difference in estimated values for $\mu$ and $\sigma^2$. All the parameters converge at a low degree with $\hat R<1.05$. And $\mu$ and $\phi$ tend to have a negative relations in joint posterior distribution, which does not mean that they have causual relationship.
+
+
+```{r, eval=TRUE,echo=TRUE}
+sim1<-mysam(10,2,200,0.3)
+data1<-list(N=length(sim1),y=sim1)
+fit1<-stan(file='lab4b.stan',data=data1,chains=4,warmup=100,iter=2000,cores=2,refresh=0)
+print('For the first simulation:')
+summary(fit1,pars=c('mu','phi','sigma2'),prob=c(0.025,0.975))$summary
+pairs(fit1,pars=c('mu','phi'))
+mu1<-extract(fit1)$mu;phi1<-extract(fit1)$phi;sigma21<-extract(fit1)$sigma2
+par(mfrow=c(2,2),mar=c(2,2,2,2))
+plot(mu1,typ='l',main='mu1');plot(phi1,typ='l',main='phi1');plot(sigma21,typ='l',main='sigma21')
+
+
+sim2<-mysam(10,2,200,0.95)
+data2<-list(N=length(sim2),y=sim2)
+fit2<-stan(file='lab4b.stan',data=data2,chains=4,warmup=100,iter=2000,cores=2,refresh=0)
+cat('\n')
+print('For the second simulation:')
+summary(fit2,pars=c('mu','phi','sigma2'),prob=c(0.025,0.975))$summary
+pairs(fit2,pars=c('mu','phi'))
+mu2<-extract(fit2)$mu;phi2<-extract(fit2)$phi;sigma22<-extract(fit2)$sigma2
+par(mfrow=c(2,2),mar=c(2,2,2,2))
+plot(mu2,typ='l',main='mu2');plot(phi2,typ='l',main='phi2');plot(sigma22,typ='l',main='sigma22')
+
+
+
+cat("\n")
+cat("Here comes Stan code:");cat("\n")
+readLines("lab4b_1.stan")
+```
+
+
+## part c)
+AR process adopted parameters $\mu=10, \phi=0.3$, and $\sigma^2~normal(2,2)$ is adopted as new prior parameter. Results refer to the following graph. 
+
+
+```{r, eval=TRUE,echo=TRUE,warning=FALSE}
+da<-read.table('campy.dat',header=TRUE)
+da<-as.vector(as.matrix(da))
+data3<-list(N=length(da),y=da)
+
+fit3<-stan(file='lab4c.stan',data=data3,chains=4,warmup=100,iter=2000,cores=2,refresh=0)
+#print(fit3,pars=c('theta'),prob=c(0.025,0.975))
+summary<-summary(fit3,pars=c('theta'),prob=c(0.025,0.975))$summary
+theta<-extract(fit3)$theta
+theta_mu<-summary[,1]
+theta_up<-summary[,5]
+theta_low<-summary[,4]
+
+#plot(theta[1,],main='Theta Posterior',xlab='Theta_i',ylab='simulations')
+#for(i in 2:dim(theta)[1]) points(theta[i,])
+plot(da,main='Theta Posterior',xlab='Theta_i',ylab='simulations')
+lines(theta_mu,col='red')
+lines(theta_up,col='blue')
+lines(theta_low,col='blue')
+legend('topright',legend=c('mean','95% CI','true c_t'),fill=c('red','blue','black'))
+
+cat("\n")
+cat("Here comes Stan code:");cat("\n")
+readLines("lab4c_1.stan")
+```
+
+
+
+## part d)
+$\sigma^2~cauchy(10,10)$ is adopted as new prior parameter, which according to the graph has made $\theta_i$ varies slightly smoother.
+
+
+```{r, eval=TRUE,echo=TRUE,warning=FALSE}
+fit4<-stan(file='lab4d.stan',data=data3,chains=4,warmup=100,iter=2000,cores=2,refresh=0)
+#print(fit3,pars=c('theta'),prob=c(0.025,0.975))
+summary<-summary(fit4,pars=c('theta'),prob=c(0.025,0.975))$summary
+theta<-extract(fit4)$theta
+theta_mu<-summary[,1]
+theta_up<-summary[,5]
+theta_low<-summary[,4]
+
+#plot(theta[1,],main='Theta Posterior New',xlab='Theta_i',ylab='simulations')
+#for(i in 2:dim(theta)[1]) points(theta[i,])
+plot(da,main='Theta Posterior',xlab='Theta_i',ylab='simulations')
+lines(theta_mu,col='red')
+lines(theta_up,col='blue')
+lines(theta_low,col='blue')
+legend('topright',legend=c('mean','95% CI','true c_t'),fill=c('red','blue','black'))
+
+cat("\n")
+cat("Here comes Stan code:");cat("\n")
+readLines("lab4d_1.stan")
+```
